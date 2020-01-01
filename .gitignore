@@ -1,0 +1,5 @@
+.vagrant/
+*.log
+*.swp
+__pycache__
+main.sh
