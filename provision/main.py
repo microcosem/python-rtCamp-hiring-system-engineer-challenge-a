@@ -4,7 +4,9 @@ import apt
 import shlex
 import tarfile
 import os, errno
+import configparser
 import secrets, string
+import sys, subprocess
 import urllib.request, shutil
 
 def installIfMissing(cmd, packages, apt_cache):
@@ -20,13 +22,16 @@ def install_dependencies():
     apt_cache.open()
 
     packages = {
-        "php": ["php-fpm", "php-mysql"],
+        "php"  : ["php-fpm", "php-mysql"],
         "mysql": ["mysql-server"],
-        "nginx": ["nginx"]
+        "nginx": ["nginx"],
+        "pip"  : ["python3-pip"]
     }
 
     for cmd in packages.keys():
         installIfMissing(cmd, packages[cmd], apt_cache)
+
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "mysql-connector-python"])
 
 def create_nginx_config(domain):
 
@@ -70,10 +75,41 @@ def download_wordpress(wordpress_path):
             shutil.chown(f"{root}/{f}", "www-data", "www-data")
 
 def create_mysql_db(db_user, db_host, password, domain):
-    pass
+
+    import mysql.connector
+
+    config = configparser.ConfigParser()
+    config.read_file(open('/etc/mysql/debian.cnf'))
+
+    db_conn = mysql.connector.connect(
+        host=db_host,
+        user=config.get('client', 'user'),
+        password=config.get('client', 'password'),
+    )
+
+    try:
+         cursor = db_conn.cursor(prepared=True)
+         cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{domain}_db`;")
+         cursor.execute(f"CREATE USER IF NOT EXISTS '{db_user}'@'{db_host}' IDENTIFIED BY '{password}';")
+         cursor.execute(f"GRANT ALL ON `{domain}_db`.* TO '{db_user}'@'{db_host}';")
+         db_conn.commit()
+    except mysql.connector.Error as err:
+        print(err)
+    finally:
+        db_conn.close()
 
 def create_wp_config(db_name, db_user, password, wordpress_path):
-    pass
+
+    wp_sample = f"{wordpress_path}/wordpress/wp-config-sample.php"
+    wp_config = f"{wordpress_path}/wordpress/wp-config.php"
+
+    with open(wp_sample, 'r') as template, open(wp_config, 'w') as conf_file:
+        for line in template:
+            conf_file.write(
+                line.replace("database_name_here", db_name)
+                    .replace("username_here", db_user)
+                    .replace("password_here", password)
+            )
 
 def main():
     alphabet = string.ascii_letters + string.digits
